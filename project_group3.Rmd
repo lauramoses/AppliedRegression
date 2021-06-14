@@ -1,0 +1,425 @@
+---
+title: "Predicting Life Expectancy for Developing Countries"
+author: "Rose Ellison, Laura Moses, Daisy Nsibu, Miriam Nyamwaro"
+date: "5/14/2021"
+output:
+  pdf_document: 
+    fig_height: 3
+    toc: yes
+    highlight: kate
+  html_notebook: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+## Purpose and Problem
+
+The goal of this project aims to determine which various predicting variables really affect the life expectancy in developing countries. Using this information, a multiple linear regression model can then be established to predict life expectancy in developing countries based on these appropriate factors. Additionally, we can answer key questions, such as: Could a country with a lower life expectancy increase it's health care expenditure in order to improve its average lifespan? How do infant and adult mortality rates affect life expectancy? What impact does schooling have on life expectancy, if any? Is there a positive correlation with immunizations and life expectancy? Do densely populated countries tend to have lower life expectancy? Does Life Expectancy has positive or negative correlation with eating habits, lifestyle, exercise, smoking, drinking alcohol etc. By analyzing these various coefficient estimates, we can hopefully provide insight to these meaningful questions. 
+
+## Life Expectancy Data 
+
+```{r message=TRUE, warning=TRUE, include=FALSE}
+# Load packages
+library(car)
+library(mctest)
+library(MPV)
+library(ggcorrplot)
+library(corrplot)
+library(knitr)
+library(olsrr)
+library(nortest)
+library(MASS)
+library(tidyverse)
+library(kableExtra)
+library(tidyr)
+library(cvTools)
+```
+
+
+```{r include=FALSE}
+# Read in data
+WHO <- read.csv('Life Expectancy Data.csv')
+dim(WHO) # 2938x22
+colnames(WHO)
+```
+
+
+```{r include=FALSE}
+# Subset by filtering developing countries then drop Country and Status columns
+developing <- WHO %>% 
+  filter(Status == 'Developing') %>% 
+  dplyr::select(-c(Country, Status))
+
+dim(developing)
+```
+
+
+```{r include=FALSE}
+# Check if there are any NA's
+developing %>% is.na(.) %>% sum(.)# 2074 NA's
+
+# Filter out NA's
+developing <- developing %>%
+  filter(!is.na(Life.expectancy),
+         !is.na(Adult.Mortality),
+         !is.na(Alcohol),
+         !is.na(Hepatitis.B),
+         !is.na(BMI),
+         !is.na(Polio),
+         !is.na(Total.expenditure),
+         !is.na(Diphtheria),
+         !is.na(GDP),
+         !is.na(Population),
+         !is.na(thinness..1.19.years),
+         !is.na(thinness.5.9.years),
+         !is.na(Income.composition.of.resources),
+         !is.na(Schooling))
+
+# Now check df dimensions and verify 0 NA's
+dim(developing) # 1407x20
+sum(is.na(developing)) # 0 NA's
+```
+
+The Global Heath Observatory (GHO) data repository under World Health Organization (WHO) keeps track of health status as well as many other related factors for all countries. The datasets are made available to the public for the purpose of health data analysis. For this particular [dataset](https://www.kaggle.com/kumarajarshi/life-expectancy-who) we will be using, health factors for 193 countries from the year 2000-2015 have been collected from the WHO data repository website, as well as corresponding economic data from the United Nation website.^1^ The initial dataset consisted of 2938 rows and 22 columns, although we chose to subset the data and filter `NA` values, resulting in a 1407 x 22 dataframe. The following columns and corresponding descriptions are included in the data: 
+
+  * `Country`= Country, 193 unique values
+  * `Year` = Year, 2000-2015
+  * `Status` = Developed (17%) or Developing (83%) status
+  * `Life.expectancy` = Life expectancy in age (36.3 - 89)
+  * `Adult.Mortality` = Adult mortality rates of both sexes (probability of dying between 15 and 60 years per 1000 population)
+  * `infant.deaths` = Number of Infant deaths per 1000 population (0 - 180)
+  * `Alcohol` = Alcohol consumption, per capita (litres of pure alcohol)
+  * `percentage.expenditure` = Expenditure on health as a percentage of GDP per capita (%)
+  * `Hepatitis.B` = Hepatitis B immunization coverage among 1-year-olds (%)
+  * `Measles` = Number of reported cases of Measles per 1000 population
+  * `BMI` = Average Body Mass Index of entire population
+  * `under.five.deaths` = Number of under-five deaths per 1000 population
+  * `Polio` = Polio immunization coverage among 1-year-olds (%)
+  * `Total.expenditure`= General government expenditure on health as a percentage of total government expenditure (%)
+  * `Diphtheria` = Diptheria tetanus toxoid and pertussis (DTP3) immunization coverage among-1-year-olds (%)
+  * `HIV.AIDS` = Deaths per 1000 live births due to HIV/AIDS (0-4 years)
+  * `GDP` = Gross Domestic Product per capita (in USD)
+  * `Population` = Population of the country
+  * `thinness..1.19.years` = Prevalence of thinness among children and adolescents for Age 10 to 19 (%)
+  * `thinness.5.9.years` = Prevalence of thinness among children for Age 5 to 9 (%)
+  * `Income.composition.of.resources` = Human Development Index in terms of income composition of resources (index ranging from 0 to 1)
+  * `Schooling` = Number of years of schooling (years)
+
+# Results and Discussion
+
+## Fit a Multiple Linear Regression Model
+
+To begin, we fit a linear model to the entire filtered developing dataset using `lm()` and `summary()`, to determine which regressors are *not* linearly significant.
+
+```{r include=FALSE}
+fit <- lm(Life.expectancy~., developing)
+summary(fit)
+```
+
+From this output, we determine that regressors `Hepatitis.B`, `Measles`, `BMI`, `Polio`, `GDP`, `Population`, `thinness..1.19 years`, and `thinness.5.9.years` all have p-values greater that 0.05, therefore they do *not* have a significant linear association with `Life.expectancy`. Because of this, we remove these regressors from our model and re-fit a new one. The table below shows our summary output for the new model, which now fits 11 regressors, instead of 19. 
+
+```{r include=FALSE}
+# Remove non-significant regressors from model
+developing <- developing %>% 
+  dplyr::select(-c(Hepatitis.B, Measles, BMI, Polio, GDP, Population, thinness..1.19.years, thinness.5.9.years))
+```
+
+```{r echo=FALSE}
+# Refit model
+fit <- lm(Life.expectancy~., developing)
+
+# Display as kable
+fit %>% 
+  broom::tidy() %>% 
+  kable(
+    digits = 4, 
+    caption = "Fitted Multiple Linear Regression Model with 11 Regressors"
+  )
+```
+
+## Checking for Multicollinearity
+
+From the correlation plot below, we can see that there are a few strongly correlated relationships between regressors. When we check for variance inflation factors, all values are less than 5 except for `under.five.deaths` and `infant.deaths`, which have values over 180. Running an `mctest()` on the fit also detects multicollinearity in these two regressors. Plotting them against each other, we can see there is a clear linear relationship between these two regressors, so we will remove `under.five.deaths`, which has the highest VIF value, from the model. Doing this fixes the multicollinearity issue. <br><br><br>
+
+
+```{r echo=FALSE}
+# Correlation plot
+corr_mat <- cor_pmat(developing[ , -2])
+
+corrplot(corr_mat, type = "upper", 
+         order = "hclust", 
+         tl.col="black",tl.srt=45, tl.cex = .7,
+         method="square")
+```
+
+```{r echo=FALSE}
+# VIF's
+as.data.frame(vif(fit)) %>% 
+  kable(
+    digits = 4, 
+    caption = "Variance Inflation Factors for Regressors")
+
+# Checking relationship between under.five.deaths and infant.deaths
+ggplot(developing) +
+  geom_point(mapping = aes(x = under.five.deaths, y = infant.deaths))
+```
+
+```{r include=FALSE}
+# Other tests
+mctest(fit, type='i') 
+```
+
+```{r include=FALSE}
+# Remove under.five.deaths from model data
+developing <- developing %>% 
+  dplyr::select(-under.five.deaths)
+
+# Re-fit data
+fit <- lm(Life.expectancy~., developing)
+
+# Verify no more multicollinearity issues
+vif(fit)
+```
+
+## Checking Assumptions
+
+In order for our model to be accurate, the residuals must follow a normal distribution and have a constant variance. While the variance assumption does not appear to be violated, there is a slight problem with the normality. Performing a Shapiro-Wilk normality test results in a p-value of $1.8\times10^{-7} < 0.05$, implying that the distribution of the data *are not* normal. Similarly, an Anderson-Darling normality test resulted in a $p-value = 8.3\times10^{-6} < 0.05$, meaning we must reject the null hypothesis that our data follow a normal distribution. 
+
+There are two methods in which we can address this, so we will investigate these. The first option is to perform a Box-Cox transformation on $y$, life expectancy in order to correct normality. If that does not work, then we can look more closely at influential observations using Cook's distance. 
+
+```{r echo=FALSE}
+# Checking Residuals
+par(mfrow = c(1,2))
+plot(fit, which = 2) # normality might have issues
+plot(fit, which = 3) # residual variance looks good
+```
+
+
+```{r include=FALSE}
+# Test normality more closely
+shapiro.test(fit$residuals)
+ad.test(fit$residuals)
+```
+
+
+### Box-Cox Transformation on `Life.expectancy`
+
+The first plot below shows the optimal $\lambda$ value as well as confidence interval to perform a Box-Cox transformation on the response $y$ variable, `Life.expectancy`.  In the second plot, we can see that there is still an issue with normality at the tail ends, even after performing our transformation. 
+
+```{r echo=FALSE}
+# Transform y with boxcox for normality
+par(mfrow = c(1,2))
+
+boxcox(fit, lambda = seq(1, 2.5, 1/10), plotit = T, interp=T)
+bc <- boxcox(fit, lambda = seq(1, 2.5, 1/10), plotit = F)
+lambda <- bc$x[which.max(bc$y)]
+fit_bc <- lm((((Life.expectancy ^ lambda) - 1) / lambda) ~., developing)
+title("Box-Cox Optimal Lambda")
+
+qqnorm(fit_bc$residuals, col = "grey")
+qqline(fit_bc$residuals, col = "dodgerblue", lwd = 2)
+```
+Performing a Shapiro-Wilks and Anderson-Darling normality test on the transformed model fit produces p-values of $0.00056$ and $0.0039$, respectively, so although they have gotten better, they still do not pass these normality tests.
+
+```{r include=FALSE}
+# Check normality of box cox fit
+shapiro.test(fit_bc$residuals) # 0.00056
+ad.test(fit_bc$residuals) # 0.0039
+```
+
+
+### Cook's Distance for Influential Observations
+
+We can clearly see some issues in the normality plot where a number of observations are affecting the residual normality and fit of the data. Using Cook's distance, we find 108 such observations which are influence both in the $x$ and $y$ direction. Since transforming `Life.expectancy` did not correct the normality issue, we will try removing the observations that are the most influential. 
+
+```{r include=FALSE}
+cooksd <- cooks.distance(fit)
+sum(cooksd > 4 / length(cooksd)) # 108 influential obs by cooks.d
+```
+
+
+```{r echo=FALSE}
+fit_cd <- lm(Life.expectancy ~.,
+                   data = developing,
+                   subset = cooksd < 4 / length(cooksd))
+
+par(mfrow = c(1,2))
+qqnorm(fit_cd$residuals, col = "grey")
+qqline(fit_cd$residuals, col = "dodgerblue", lwd = 2)
+
+plot(fit_cd, which = 3)
+```
+Visually, the residual normality plot appears to be normal and we can see an improvement over the previous plots. Moreover, the Shapiro-Wilk normality test on the Cook's distance modified model resulted in a p-value of $0.05074$, implying we have sufficient evidence to say that our data *does* follow a normal distribution. Thus, we will use this model fit going forward. 
+
+```{r}
+# Check normality of cooks d fit
+shapiro.test(fit_cd$residuals)
+```
+
+```{r include=FALSE}
+# Adopt cooks d model fit
+fit <- fit_cd
+developing <- subset(developing, cooksd < 4 / length(cooksd))
+```
+
+## Variable Selection
+
+In order to choose the best model, we will perform variable selection using an all-possible-regressions approach. There 5 models determined as the best options: 
+
+  * **Model 1:** Life.expectancy ~ Year + Adult.Mortality + infant.deaths + Alcohol + percentage.expenditure + Total.expenditure + Diphtheria + HIV.AIDS + Income.composition.of.resources + Schooling *(All regressors)*
+  * **Model 2:** Life.expectancy ~ Year + Adult.Mortality + Alcohol + percentage.expenditure + Total.expenditure + Diphtheria + HIV.AIDS + Income.composition.of.resources + Schooling
+  * **Model 3:** Life.expectancy ~ Year + Adult.Mortality + infant.deaths + Alcohol + percentage.expenditure + Diphtheria + HIV.AIDS + Income.composition.of.resources + Schooling
+  * **Model 4:** (Life.expectancy ~ Year + Adult.Mortality + percentage.expenditure + Total.expenditure + Diphtheria + HIV.AIDS + Income.composition.of.resources + Schooling 
+  * **Model 5:** Life.expectancy ~ Year + Adult.Mortality + Alcohol + percentage.expenditure + Diphtheria + HIV.AIDS + Income.composition.of.resources + Schooling
+  
+\newpage
+
+```{r echo=FALSE, fig.height=6, fig.width=6, paged.print=TRUE}
+# 1.) Best_subset
+ols_step_best_subset(fit)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# 2.) Backward Selection
+
+step(fit, direction="backward") #Using AIC
+step(fit, direction="backward",k=log(nrow(developing))) #Using BIC
+ols_step_backward_p(fit)
+ols_step_backward_aic(fit)
+```
+
+```{r include=FALSE}
+# 3.) Forward Selection
+lm.f <- lm(Life.expectancy ~ 1, developing)
+step(lm.f,scope=list(lower=lm.f,upper=fit), direction="forward", k=log(nrow(developing)) ) #Using BIC
+step(lm.f,scope=list(lower=lm.f,upper=fit), direction="forward"  ) #Using AIC
+ols_step_forward_p(fit)
+ols_step_forward_aic(fit)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#4.) Stepwise Selection
+
+step(lm.f,scope=list(lower=lm.f,upper=fit), direction="both", k=log(nrow(developing)) ) #Using BIC
+step(fit,scope=list(lower=lm.f,upper=fit), direction="both" ) #Using AIC
+```
+
+## Model Validation
+
+Taking into consideration error comparison, multicollinearity, residuals normality and variance, as well as R<sub>adj</sub>^2^, all models returned very similar results. Model 1, however, had a slightly smaller error and a slightly larger R<sub>adj</sub>^2^ than the others. However, when running a cross-validation analysis, Model 4 was deemed the best model. Again, the cross-validation values, as seen below, were also approximately the same. Thus, we chose to use Model 1 as our best model fit, since it had the lower error and better R<sub>adj</sub>^2^. 
+
+```{r include=FALSE}
+m1 <- lm(Life.expectancy ~ Year + Adult.Mortality + infant.deaths + Alcohol + percentage.expenditure + 
+           Total.expenditure + Diphtheria + HIV.AIDS + Income.composition.of.resources + Schooling, developing) # regressors
+
+m2 <- lm(Life.expectancy ~ Year + Adult.Mortality + Alcohol + percentage.expenditure + Total.expenditure + 
+           Diphtheria + HIV.AIDS + Income.composition.of.resources + Schooling, developing) # - infant.deaths
+  
+m3 <- lm(Life.expectancy ~ Year + Adult.Mortality + infant.deaths + Alcohol + percentage.expenditure + 
+           Diphtheria + HIV.AIDS + Income.composition.of.resources + Schooling, developing) # - Total.expenditure
+
+m4 <- lm(Life.expectancy ~ Year + Adult.Mortality + percentage.expenditure + Total.expenditure + 
+           Diphtheria + HIV.AIDS + Income.composition.of.resources + Schooling, developing) # - infant.deaths + Alcohol
+  
+m5 <- lm(Life.expectancy ~ Year + Adult.Mortality + Alcohol + percentage.expenditure + 
+           Diphtheria + HIV.AIDS + Income.composition.of.resources + Schooling, developing) # - Total.expenditure + infant.deaths
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#COMPARE MODELS
+# Error comparison
+PRESS(m1) # 11194.39 SMALLEST
+PRESS(m2) # 11253.88
+PRESS(m3) # 11475.38
+PRESS(m4) # 11408.30
+PRESS(m5) # 11575.72
+
+# Compare Multicollinearity
+vif(m1) # no MC
+vif(m2) # no MC
+vif(m3) # no MC
+vif(m4) # no MC
+vif(m5) # no MC
+
+## model fit checking 
+# normality of residuals
+plot(m1,which=2) # normal
+plot(m2, which=2) # normal
+plot(m3, which=2) # normal
+plot(m4, which=2) # normal
+plot(m5, which=2) # normal
+
+# variance of residuals 
+plot(m1, which=3) # good
+plot(m2, which=3) # good
+plot(m3, which=3) # good
+plot(m4, which=3) # good
+plot(m5, which=3) # good
+
+# inspect BIG differences in magnitudes and changes in the signs of the coefficients
+summary(m1) # highest adj R^2 = 0.8559
+summary(m2)
+summary(m3)
+summary(m4)
+summary(m5)
+```
+
+
+```{r echo=FALSE}
+# Perform cross-validation for an LS regression model
+folds <- cvFolds(nrow(developing), K = 2, R = 20) 
+cvfit1 <- cvLm(m1, cost = rtmspe,folds = folds)
+cvfit2 <- cvLm(m2, cost = rtmspe,folds = folds)
+cvfit3 <- cvLm(m3, cost = rtmspe,folds = folds)
+cvfit4 <- cvLm(m4, cost = rtmspe,folds = folds)
+cvfit5 <- cvLm(m5, cost = rtmspe,folds = folds)
+
+# Combine cross-validation results for various models into one object 
+#and select the model with the best prediction performance.
+cvFits <- cvSelect(LS1 = cvfit1, LS2 =cvfit2, LS3 = cvfit3, LS4 = cvfit4, LS5 = cvfit5)
+cvFits[5] %>% kable(digits=3, caption = "Cross-validation on 5 Models.")
+```
+
+\newpage
+## Best Fitted Model
+
+The table below shows the $\beta$ coefficient estimates for the best multiple linear regression fitted model. 
+
+```{r echo=FALSE}
+# Best Model Coefficient Estimates 
+my_model <- m1
+my_model %>% 
+  broom::tidy() %>% 
+  kable(
+    digits = 4, 
+    caption = "Best Fit Multiple Linear Regression Model Beta Estimates"
+    )
+```
+
+**The best model is:**
+
+
+\begin{multline*}
+\hat{life\ expectancy} = 377.88 -0.16 \cdot \ year -0.02 \cdot \ adult\ mortality -0.0021 \cdot infant\ deaths \\ -0.13 \cdot alcohol + 0.0009 \cdot \ percentage\ expenditure + 0.24 \cdot \ total\ expenditure + 0.018 \cdot \ diptheria \\ - 0.45 \cdot \ HIV/AIDS  + 14.33 \cdot \ income\ composition \ of\ resources + 0.75 \cdot \ schooling
+\end{multline*}
+
+With an $R_{adj}=0.8559$, we know that $85.6\%$ of the variation in life expectancy can be explained by the regressors.
+
+# Conclusion
+
+## Summary
+
+The relevant predicting variables for life expectancy we determined are year, adult mortality rates, number of infant deaths, alcohol consumption, expenditure on health as a percentage of GDP per capita, government expenditure on health as a percentage of total government expenditure, DPT3 immunization coverage among 1-year-olds, deaths due to HIV/AIDS, income composition of resources index, and number of years of schooling. Based on our model, an increase in the total expenditure and/or percentage expenditure would improve the average lifespan. Moreover, having more schooling and DPT3 immunizations among children can also improve life expectancy. In contrast, infant and adult mortality rates negatively affect life expectancy, as well as HIV/AIDS and drinking alcohol. Apart from drinking habits, other lifestyle habits that affect BMI were not found to have a linearly significant impact on life expectancy. Country population was also deemed insignificant, so is unclear whether life expectancy is lower in densely populated countries. However, we are confident that this model can be used to reasonably predict life expectancy's for developing countries using the health and economic information available from the World Health Organization and United Nations databases. 
+
+## Future Research
+
+In the future, it would be interesting to do a comparative analysis between the developing countries and developed countries. Do the predictor variables for the two classes of country status differ? Additionally, factoring various economic, social, and health by groups may also prove interesting. 
+
+# References 
+
+  1. [Rajarshi, K. (2018, February 10). Life Expectancy (WHO). Kaggle.](https://www.kaggle.com/kumarajarshi/life-expectancy-who)
